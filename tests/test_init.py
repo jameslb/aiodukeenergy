@@ -382,7 +382,7 @@ class TestCodeExchange:
             auth0_client = Auth0Client(session)
 
             # Generate auth URL first (to get code_verifier)
-            auth_url, state, code_verifier = auth0_client.get_authorization_url()
+            _, _, code_verifier = auth0_client.get_authorization_url()
 
             auth = DukeEnergyAuth(session, auth0_client)
 
@@ -555,6 +555,78 @@ class TestUsageAPI:
     """Tests for energy usage API calls."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("interval", "period", "response_count", "expected_data", "expected_missing"),
+        [
+            pytest.param("DAILY", "BILLINGCYCLE", 0, 0, 3, id="empty-daily"),
+            pytest.param("DAILY", "BILLINGCYCLE", 2, 2, 1, id="partial-daily"),
+            pytest.param("DAILY", "BILLINGCYCLE", 3, 3, 0, id="complete-daily"),
+            pytest.param("HOURLY", "DAY", 3, 3, 21, id="partial-hourly"),
+            pytest.param("HOURLY", "DAY", 24, 24, 0, id="complete-hourly"),
+        ],
+    )
+    async def test_short_and_complete_usage_arrays(
+        self,
+        mock_duke_token_response,
+        mock_account_list_response,
+        mock_account_details_response,
+        interval,
+        period,
+        response_count,
+        expected_data,
+        expected_missing,
+    ):
+        """Short responses preserve valid rows and report the absent tail."""
+        test_token = _create_test_jwt(exp_offset_seconds=3600)
+        test_id_token = _create_test_jwt(exp_offset_seconds=3600)
+        start = datetime.strptime("2024-01-01", "%Y-%m-%d")
+        end = start + timedelta(days=2 if interval == "DAILY" else 0)
+        usage_data = []
+        for index in range(response_count):
+            timestamp = start + (
+                timedelta(days=index) if interval == "DAILY" else timedelta(hours=index)
+            )
+            usage_data.append(
+                {
+                    "date": (
+                        f"{timestamp.month}/{timestamp.strftime('%d/%Y')}"
+                        if interval == "DAILY"
+                        else timestamp.strftime("%I %p")
+                    ),
+                    "usage": str(index + 1),
+                    "temperatureAvg": 30,
+                }
+            )
+
+        async with aiohttp.ClientSession() as session:
+            auth0_client = Auth0Client(session)
+            auth = DukeEnergyAuth(
+                session,
+                auth0_client,
+                access_token=test_token,
+                refresh_token="refresh",  # noqa: S106
+                id_token=test_id_token,
+            )
+            with aioresponses() as mocked:
+                setup_auth_mocks(mocked, mock_duke_token_response)
+                setup_api_mocks(
+                    mocked,
+                    mock_account_list_response,
+                    mock_account_details_response,
+                    usage_data,
+                )
+                client = DukeEnergy(auth)
+                meters = await client.get_meters()
+                serial_number = next(iter(meters))
+                result = await client.get_energy_usage(
+                    serial_number, interval, period, start, end
+                )
+
+        assert len(result["data"]) == expected_data
+        assert len(result["missing"]) == expected_missing
+        assert all(data["energy"] > 0 for data in result["data"].values())
+
+    @pytest.mark.asyncio
     async def test_hourly_energy_usage(
         self,
         mock_duke_token_response,
@@ -724,17 +796,17 @@ class TestUsageAPI:
                 timestamps = sorted(result["data"].keys())
                 for i in range(1, len(timestamps)):
                     time_diff = timestamps[i] - timestamps[i - 1]
-                    assert time_diff == timedelta(
-                        hours=1
-                    ), f"Expected 1 hour difference, got {time_diff}"
+                    assert time_diff == timedelta(hours=1), (
+                        f"Expected 1 hour difference, got {time_diff}"
+                    )
 
                 # The 1 AM on day 2 should have the first value, not the duplicate
                 day2_1am = start + timedelta(days=1, hours=1)
                 if day2_1am in result["data"]:
                     energy_value = result["data"][day2_1am]["energy"]
-                    assert (
-                        energy_value != 900.0
-                    ), "Should not have the duplicate hour value (900.0)"
+                    assert energy_value != 900.0, (
+                        "Should not have the duplicate hour value (900.0)"
+                    )
 
 
 class TestErrorHandling:
