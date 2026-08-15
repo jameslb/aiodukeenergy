@@ -221,7 +221,7 @@ class DukeEnergy:
         num_expected_values = (end_date - start_date).days + 1
 
         # Extract temperature data
-        temp = [usage_array[i]["temperatureAvg"] for i in range(num_expected_values)]
+        temp = [row.get("temperatureAvg") for row in usage_array[:num_expected_values]]
         temp_len = len(temp)
 
         # If interval is hourly, multiply the number of values by 24
@@ -245,6 +245,10 @@ class DukeEnergy:
             date = start_date + delta
             n = i - offset
 
+            if n >= usage_len:
+                missing.append(date)
+                continue
+
             expected_series = (
                 date.strftime("%I %p")
                 if interval == "HOURLY"
@@ -262,7 +266,7 @@ class DukeEnergy:
                 offset += 1
                 continue
 
-            if n >= usage_len or not float(usage_array[n]["usage"]) > 0:
+            if not float(usage_array[n]["usage"]) > 0:
                 missing.append(date)
                 continue
 
