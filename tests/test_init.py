@@ -3,11 +3,14 @@
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
 from aioresponses import aioresponses
+from zoneinfo import ZoneInfo
 
+import aiodukeenergy.dukeenergy as dukeenergy_module
 from aiodukeenergy import (
     AbstractDukeEnergyAuth,
     Auth0Client,
@@ -553,6 +556,120 @@ class TestAccountAPI:
 
 class TestUsageAPI:
     """Tests for energy usage API calls."""
+
+    @staticmethod
+    async def _capture_daily_request_body(
+        monkeypatch,
+        frozen_now: datetime,
+        start: datetime,
+        end: datetime,
+    ) -> dict[str, Any]:
+        """Return the exact body sent for an isolated DAILY request."""
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                current = frozen_now
+                if tz is None:
+                    return current.replace(tzinfo=None)
+                if current.tzinfo is None:
+                    return current.replace(tzinfo=tz)
+                return current.astimezone(tz)
+
+        monkeypatch.setattr(dukeenergy_module, "datetime", FrozenDateTime)
+        client = DukeEnergy(None)
+        client._meters = {
+            "gas-meter": {
+                "serviceType": "GAS",
+                "serialNum": "gas-meter",
+                "agreementActiveDate": "2020-01-01",
+                "agreementEndDate": "2999-01-01",
+                "meterCertificationDate": "2020-01-01",
+                "account": {
+                    "srcSysCd": "srcSysCd",
+                    "srcAcctId": "srcAcctId",
+                    "srcAcctId2": "srcAcctId2",
+                    "serviceAddressParsed": {"zipCode": "zipCode"},
+                },
+            }
+        }
+        post_json = AsyncMock(return_value={"usageArray": []})
+        monkeypatch.setattr(client, "_post_json", post_json)
+
+        await client.get_energy_usage("gas-meter", "DAILY", "BILLINGCYCLE", start, end)
+
+        return post_json.await_args.args[1]
+
+    @pytest.mark.asyncio
+    async def test_daily_request_body_normal_range(self, monkeypatch):
+        """DAILY requests retain the captured month and previous-day behavior."""
+        body = await self._capture_daily_request_body(
+            monkeypatch,
+            datetime(2026, 8, 15, 12, 34, 56, 789123),
+            datetime(2024, 1, 5),
+            datetime(2024, 1, 7),
+        )
+
+        assert body["date"] == "2024-01-14T12:34:56.789"
+        assert body["startDate"] == "01/05/2024"
+        assert body["endDate"] == "01/07/2024"
+        assert body["intervalFrequency"] == "DAILY"
+        assert body["periodType"] == "BILLINGCYCLE"
+
+    @pytest.mark.asyncio
+    async def test_daily_request_body_month_boundary(self, monkeypatch):
+        """The previous-day adjustment can cross into the preceding month."""
+        body = await self._capture_daily_request_body(
+            monkeypatch,
+            datetime(2026, 3, 1, 6, 7, 8, 901234),
+            datetime(2024, 2, 1),
+            datetime(2024, 2, 7),
+        )
+
+        assert body["date"] == "2024-01-31T06:07:08.901"
+        assert body["startDate"] == "02/01/2024"
+        assert body["endDate"] == "02/07/2024"
+
+    @pytest.mark.asyncio
+    async def test_daily_request_body_billing_cycle_boundary(self, monkeypatch):
+        """Billing-cycle bounds do not alter the legacy DAILY date calculation."""
+        body = await self._capture_daily_request_body(
+            monkeypatch,
+            datetime(2026, 8, 15, 12, 34, 56, 789123),
+            datetime(2024, 1, 28),
+            datetime(2024, 2, 27),
+        )
+
+        assert body["date"] == "2024-01-14T12:34:56.789"
+        assert body["startDate"] == "01/28/2024"
+        assert body["endDate"] == "02/27/2024"
+        assert body["periodType"] == "BILLINGCYCLE"
+
+    @pytest.mark.asyncio
+    async def test_daily_request_body_timezone_aware_start(self, monkeypatch):
+        """DAILY request dates use start_date's timezone and current local time."""
+        eastern = ZoneInfo("America/New_York")
+        body = await self._capture_daily_request_body(
+            monkeypatch,
+            datetime(2026, 8, 15, 12, 34, 56, 789123, tzinfo=timezone.utc),
+            datetime(2024, 1, 5, tzinfo=eastern),
+            datetime(2024, 1, 7, tzinfo=eastern),
+        )
+
+        assert body["date"] == "2024-01-14T08:34:56.789-05:00"
+        assert body["startDate"] == "01/05/2024"
+        assert body["endDate"] == "01/07/2024"
+
+    @pytest.mark.asyncio
+    async def test_daily_request_body_current_day_31_february_start(self, monkeypatch):
+        """Document the legacy invalid-date limitation for shorter months."""
+        with pytest.raises(ValueError, match="day is out of range for month"):
+            await self._capture_daily_request_body(
+                monkeypatch,
+                datetime(2026, 3, 31, 12, 34, 56, 789123),
+                datetime(2024, 2, 1),
+                datetime(2024, 2, 29),
+            )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

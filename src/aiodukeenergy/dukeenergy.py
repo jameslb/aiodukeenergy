@@ -188,6 +188,9 @@ class DukeEnergy:
                 "periodType": period,
                 # Duke Energy API expects year+month+day (hourly) or year+month (daily)
                 # from startDate, combined with the current time of day offset by 1.
+                # Upstream PR #20 proposes using startDate's full date for DAILY too.
+                # Keep the captured, working behavior until stronger evidence
+                # supports it.
                 "date": (
                     datetime.now(start_date.tzinfo).replace(
                         year=start_date.year,
