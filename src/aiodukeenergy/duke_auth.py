@@ -193,7 +193,7 @@ class AbstractDukeEnergyAuth(ABC):
             str(_AUTH_TOKEN_URL),
             headers=headers,
             json={"idToken": id_token},
-            timeout=self._timeout,
+            timeout=aiohttp.ClientTimeout(total=self._timeout),
         ) as response:
             if response.status != 200:
                 text = await response.text()
