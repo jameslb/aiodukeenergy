@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import aiohttp
 import pytest
 from aioresponses import aioresponses
+from yarl import URL
 from zoneinfo import ZoneInfo
 
 import aiodukeenergy.dukeenergy as dukeenergy_module
@@ -17,6 +18,7 @@ from aiodukeenergy import (
     DukeEnergy,
     DukeEnergyAuth,
 )
+from aiodukeenergy.auth0 import MOBILE_USER_AGENT
 
 
 # Create a valid-looking JWT for testing (not cryptographically valid, but parseable)
@@ -410,6 +412,13 @@ class TestCodeExchange:
                 assert "access_token" in result
                 assert auth.token is not None
                 assert auth.internal_user_id == "DUKE_TEST_USER"
+                request = mocked.requests[
+                    (
+                        "POST",
+                        URL("https://api-v2.cma.duke-energy.app/login/auth-token"),
+                    )
+                ][0]
+                assert request.kwargs["headers"]["User-Agent"] == MOBILE_USER_AGENT
 
     @pytest.mark.asyncio
     async def test_get_id_token_without_authentication(self):
@@ -516,6 +525,12 @@ class TestAccountAPI:
                 assert len(accounts) == 1
                 assert "accountNumber" in accounts
                 assert accounts["accountNumber"]["srcSysCd"] == "srcSysCd"
+                request = next(
+                    requests[0]
+                    for (method, url), requests in mocked.requests.items()
+                    if method == "GET" and url.path.endswith("/account-list")
+                )
+                assert request.kwargs["headers"]["User-Agent"] == MOBILE_USER_AGENT
 
     @pytest.mark.asyncio
     async def test_get_meters(
