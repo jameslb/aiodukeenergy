@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -6,18 +7,25 @@ import jwt
 import pytest
 from aioresponses import aioresponses
 from cryptography.hazmat.primitives.asymmetric import rsa
+from yarl import URL
 
 from aiodukeenergy import (
     Auth0Client,
     DukeEnergyAuthError,
     DukeEnergyOAuthCallbackError,
 )
+from aiodukeenergy.auth0 import _AUTH0_CLIENT, MOBILE_USER_AGENT
 
 CLIENT_ID = "PitoKqxMh8thrFF8rRlYGrAs3LbSD2dj"
 CALLBACK = "https://login.duke-energy.com/ios/com.duke-energy.app/callback"
 TOKEN_URL = "https://login.duke-energy.com/oauth/token"  # noqa: S105
 JWKS_URL = "https://login.duke-energy.com/.well-known/jwks.json"
 ISSUER = "https://login.duke-energy.com/"
+
+
+def _request_headers(mocked, method: str, url: str) -> dict[str, str]:
+    """Return headers captured for one mocked request."""
+    return mocked.requests[(method, URL(url))][0].kwargs["headers"]
 
 
 @pytest.fixture
@@ -68,6 +76,12 @@ async def test_successful_manual_callback(signing_material):
             mocked.get(JWKS_URL, payload=jwks)
             result = await client.complete_authorization(
                 transaction, callback(transaction)
+            )
+            assert _request_headers(mocked, "POST", TOKEN_URL)["User-Agent"] == (
+                MOBILE_USER_AGENT
+            )
+            assert _request_headers(mocked, "GET", JWKS_URL)["User-Agent"] == (
+                MOBILE_USER_AGENT
             )
 
     assert result.token == token
@@ -181,3 +195,13 @@ async def test_refresh_token_after_manual_setup():
         with aioresponses() as mocked:
             mocked.post(TOKEN_URL, payload=refreshed)
             assert await client.refresh_token("refresh") == refreshed
+            assert _request_headers(mocked, "POST", TOKEN_URL)["User-Agent"] == (
+                MOBILE_USER_AGENT
+            )
+
+
+def test_mobile_client_metadata_matches_current_duke_app():
+    """Auth0 telemetry identifies the current supported mobile client."""
+    metadata = json.loads(base64.b64decode(_AUTH0_CLIENT))
+    assert metadata["env"]["iOS"] == "27.0"
+    assert metadata["version"] == "2.19.0"

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 import yarl
 
-from .auth0 import Auth0Client, decode_token, is_token_expired
+from .auth0 import MOBILE_USER_AGENT, Auth0Client, decode_token, is_token_expired
 from .exceptions import DukeEnergyAuthError, DukeEnergyTokenExpiredError
 
 if TYPE_CHECKING:
@@ -184,7 +184,7 @@ class AbstractDukeEnergyAuth(ABC):
             "Content-Type": "application/json; charset=utf-8",
             "Accept": "application/json",
             "platform": "iOS",
-            "User-Agent": "Duke%20Energy/1241 CFNetwork/3860.300.31 Darwin/25.2.0",
+            "User-Agent": MOBILE_USER_AGENT,
         }
 
         _LOGGER.debug("Exchanging id_token for Duke Energy API token")
@@ -250,7 +250,7 @@ class AbstractDukeEnergyAuth(ABC):
                 "Content-Type": "application/json; charset=utf-8",
                 "Accept": "application/json",
                 "platform": "iOS",
-                "User-Agent": "Duke%20Energy/1250 CFNetwork/3860.300.31 Darwin/25.2.0",
+                "User-Agent": MOBILE_USER_AGENT,
             }
         )
 
