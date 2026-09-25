@@ -1025,6 +1025,31 @@ class TestErrorHandling:
                     await auth.authenticate_with_code("test_code", "verifier")
 
     @pytest.mark.asyncio
+    async def test_duke_energy_edge_block_is_not_auth_failure(
+        self, mock_auth0_token_response
+    ):
+        """Test an HTML edge rejection is distinguished from invalid credentials."""
+        from aiodukeenergy import DukeEnergyBlockedError
+
+        async with aiohttp.ClientSession() as session:
+            auth = DukeEnergyAuth(session, Auth0Client(session))
+
+            with aioresponses() as mocked:
+                mocked.post(
+                    "https://login.duke-energy.com/oauth/token",
+                    payload=mock_auth0_token_response,
+                )
+                mocked.post(
+                    "https://api-v2.cma.duke-energy.app/login/auth-token",
+                    status=403,
+                    body="<html><title>Access Denied</title></html>",
+                    headers={"Content-Type": "text/html"},
+                )
+
+                with pytest.raises(DukeEnergyBlockedError, match="edge rejected"):
+                    await auth.authenticate_with_code("test_code", "verifier")
+
+    @pytest.mark.asyncio
     async def test_auth0_token_refresh_failure(self):
         """Test Auth0 token refresh returns error on failure."""
         from aiodukeenergy import DukeEnergyTokenExpiredError
@@ -1051,6 +1076,31 @@ class TestErrorHandling:
                 )
 
                 with pytest.raises(DukeEnergyTokenExpiredError, match="Token refresh"):
+                    await auth.async_get_id_token()
+
+    @pytest.mark.asyncio
+    async def test_transient_auth0_refresh_failure_does_not_request_reauth(self):
+        """Test temporary Auth0 failures remain retryable HTTP errors."""
+        expired_token = _create_test_jwt(exp_offset_seconds=-3600)
+        expired_id_token = _create_test_jwt(exp_offset_seconds=-3600)
+
+        async with aiohttp.ClientSession() as session:
+            auth = DukeEnergyAuth(
+                session,
+                Auth0Client(session),
+                access_token=expired_token,
+                id_token=expired_id_token,
+                refresh_token="refresh_token",  # noqa: S106
+            )
+
+            with aioresponses() as mocked:
+                mocked.post(
+                    "https://login.duke-energy.com/oauth/token",
+                    status=503,
+                    payload={"error": "temporarily_unavailable"},
+                )
+
+                with pytest.raises(aiohttp.ClientResponseError):
                     await auth.async_get_id_token()
 
     @pytest.mark.asyncio

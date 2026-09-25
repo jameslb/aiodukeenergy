@@ -431,6 +431,8 @@ class Auth0Client:
 
         if response.status != 200:
             text = await response.text()
+            if response.status == 429 or response.status >= 500:
+                response.raise_for_status()
             _LOGGER.error("Token refresh failed: %s", text)
             raise DukeEnergyAuthError(
                 f"Token refresh failed: {response.status} - {text}"
