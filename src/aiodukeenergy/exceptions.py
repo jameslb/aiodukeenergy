@@ -9,6 +9,10 @@ class DukeEnergyAuthError(DukeEnergyError):
     """Exception raised when authentication fails."""
 
 
+class DukeEnergyBlockedError(DukeEnergyError):
+    """Exception raised when Duke's edge rejects a request before authentication."""
+
+
 class DukeEnergyOAuthCallbackError(DukeEnergyAuthError):
     """Exception raised when Auth0 returns an OAuth error callback."""
 

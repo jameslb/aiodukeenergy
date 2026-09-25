@@ -27,7 +27,11 @@ import aiohttp
 import yarl
 
 from .auth0 import MOBILE_USER_AGENT, Auth0Client, decode_token, is_token_expired
-from .exceptions import DukeEnergyAuthError, DukeEnergyTokenExpiredError
+from .exceptions import (
+    DukeEnergyAuthError,
+    DukeEnergyBlockedError,
+    DukeEnergyTokenExpiredError,
+)
 
 if TYPE_CHECKING:
     from aiohttp import ClientResponse
@@ -197,6 +201,16 @@ class AbstractDukeEnergyAuth(ABC):
         ) as response:
             if response.status != 200:
                 text = await response.text()
+                if response.content_type != "application/json":
+                    _LOGGER.debug(
+                        "Duke Energy edge rejected token exchange: %s - %s",
+                        response.status,
+                        text,
+                    )
+                    raise DukeEnergyBlockedError(
+                        "Duke Energy edge rejected the token exchange "
+                        f"with HTTP {response.status}"
+                    )
                 _LOGGER.error(
                     "Duke Energy token exchange failed: %s - %s",
                     response.status,
