@@ -114,7 +114,7 @@ class DukeEnergy:
         for account in account_list["accounts"]:
             account["srcSysCd"] = account.get("srcSysCd") or "ISU"
             account["srcAcctId"] = account.get("srcAcctId") or account["accountNumber"]
-            account.setdefault("srcAcctId2", "")
+            account["srcAcctId2"] = account.get("srcAcctId2") or ""
             account["primaryBpNumber"] = account.get("primaryBpNumber") or account.get(
                 "primaryBPNumber"
             )

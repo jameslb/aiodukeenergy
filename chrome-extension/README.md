@@ -1,99 +1,25 @@
-# Duke Energy OAuth Helper - Chrome Extension
+# Duke Energy OAuth Helper
 
-This Chrome extension captures OAuth authorization codes from Duke Energy's mobile app login flow, which uses a custom `cma-prod://` URL scheme that browsers cannot normally handle.
+This optional Chrome extension captures Duke's iOS HTTPS callback and legacy Android `cma-prod://` callback. It also sends an iOS Safari User-Agent to `login.duke-energy.com`, following the workaround reported in [upstream PR 23](https://github.com/hunterjm/aiodukeenergy/pull/23) for desktop logins returning `access_denied`. It does not guarantee that every account or browser will authorize successfully.
 
-## Why is this needed?
+## Install and use
 
-Duke Energy's mobile app uses Auth0 for authentication with a custom redirect URI (`cma-prod://login.duke-energy.com/android/com.dukeenergy.customerapp.release/callback`). Standard browsers cannot handle this custom scheme, so this extension intercepts the redirect and captures the authorization code for you.
+Review `manifest.json`, `rules.json`, and the source before installing. In Chrome's `chrome://extensions/` page, enable Developer mode, choose **Load unpacked**, and select this folder. Follow your browser's extension policy; do not disable security controls.
 
-## Installation
+Start a fresh sign-in from the application after enabling the helper. Complete Duke's login and any verification steps. The capture page displays a masked code on success or Duke's error text on failure.
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in the top right)
-3. Click "Load unpacked"
-4. Select this `chrome-extension` folder
-5. The extension icon should appear in your toolbar
+-   For [jameslb/ha-dukeenergy](https://github.com/jameslb/ha-dukeenergy)'s manual callback form, choose **Copy complete callback URL** and paste it into the same Home Assistant setup flow. This includes the transaction state that Home Assistant must validate.
+-   For `examples/browser_auth.py` or applications asking for a code only, use the copy icon beside the masked code.
+-   Legacy Home Assistant flows using a JWT state containing `flow_id` retain their existing automatic redirect behavior.
 
-## Usage
+The complete-URL button appears only for a matching iOS callback with a nonempty state and no OAuth error. A URL containing `error=access_denied` has no usable authorization code; start a fresh login after addressing the failure.
 
-### With browser_auth.py script
+## Permissions and privacy
 
-1. Run the `browser_auth.py` script:
+The helper uses `webNavigation` and `tabs` to detect callback navigation. Its declarative request rule changes the User-Agent and removes Chromium client-hint headers only for `login.duke-energy.com`. Other domains are not included in that rule. There is no analytics or external callback-storage service.
 
-   ```bash
-   cd examples
-   python browser_auth.py
-   ```
+Codes and callback URLs are sensitive, short-lived, and single-use. They are held in the local capture-page URL and copied to the clipboard only when selected. Close the capture tab and clear sensitive clipboard contents after use; do not share the URL or screenshots containing it. Disable or remove the helper when finished if desired.
 
-2. The script will:
+## Local regression checks
 
-   - Generate an authorization URL
-   - Open your browser to the Duke Energy login page
-   - Wait for you to paste the authorization code
-
-3. Complete the login in your browser:
-
-   - Enter your Duke Energy credentials
-   - Complete any MFA/verification steps
-
-4. After successful login:
-
-   - The extension will capture the `cma-prod://` redirect
-   - A page will show with your authorization code
-   - Copy the code
-
-5. Paste the code back into the terminal when prompted
-
-6. The script will exchange the code for Duke Energy API tokens
-
-### Manual Usage
-
-1. Open the extension popup to see if any code has been captured
-2. Click "View Full Details" to see the complete authorization data
-3. Click "Copy Code" to copy the authorization code to clipboard
-4. Click "Clear" to reset for a new login attempt
-
-## How it works
-
-1. When you complete the Duke Energy login, Auth0 redirects to `cma-prod://...?code=...`
-2. Chrome cannot handle this URL scheme and would normally show an error
-3. This extension intercepts that navigation attempt
-4. It extracts the `code` and `state` parameters
-5. It redirects you to a capture page showing the extracted data
-
-Duke's login (`login.duke-energy.com`) rejects desktop browsers with `access_denied` after the password step, so the extension also makes Chrome identify as iOS Safari for that one domain (`rules.json`). Requests to every other site are left untouched.
-
-## Files
-
-- `manifest.json` - Extension configuration
-- `background.js` - Service worker that intercepts redirects
-- `rules.json` - Sends an iOS Safari User-Agent to `login.duke-energy.com`
-- `popup.html` - Extension popup UI
-- `capture.html` - Page displayed after capturing the code
-
-## Security Notes
-
-- The authorization code is only stored temporarily in the extension
-- Codes expire after a few minutes and can only be used once
-- The extension only has permission to access Duke Energy login URLs
-- Use "Clear" to remove captured codes after use
-
-## Troubleshooting
-
-**Extension not capturing the code:**
-
-- Make sure Developer mode is enabled
-- Reload the extension
-- Check that the extension has the required permissions
-
-**Code not working:**
-
-- Authorization codes expire quickly (usually within 5 minutes)
-- Each code can only be used once
-- Make sure to use the code immediately after capture
-
-**Login page not loading:**
-
-- Clear browser cookies for duke-energy.com
-- Try an incognito window
-- Disable other extensions that might interfere
+Run `node --test chrome-extension/capture.test.cjs` from the repository root. These tests use synthetic data and browser API stubs; they do not install the extension or log in to Duke.
