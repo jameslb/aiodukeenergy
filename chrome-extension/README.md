@@ -8,9 +8,9 @@ Review `manifest.json`, `rules.json`, and the source before installing. In Chrom
 
 Start a fresh sign-in from the application after enabling the helper. Complete Duke's login and any verification steps. The capture page displays a masked code on success or Duke's error text on failure.
 
--   For [jameslb/ha-dukeenergy](https://github.com/jameslb/ha-dukeenergy)'s manual callback form, choose **Copy complete callback URL** and paste it into the same Home Assistant setup flow. This includes the transaction state that Home Assistant must validate.
--   For `examples/browser_auth.py` or applications asking for a code only, use the copy icon beside the masked code.
--   Legacy Home Assistant flows using a JWT state containing `flow_id` retain their existing automatic redirect behavior.
+- For [jameslb/ha-dukeenergy](https://github.com/jameslb/ha-dukeenergy)'s manual callback form, choose **Copy complete callback URL** and paste it into the same Home Assistant setup flow. This includes the transaction state that Home Assistant must validate.
+- For `examples/browser_auth.py` or applications asking for a code only, use the copy icon beside the masked code.
+- Legacy Home Assistant flows using a JWT state containing `flow_id` retain their existing automatic redirect behavior.
 
 The complete-URL button appears only for a matching iOS callback with a nonempty state and no OAuth error. A URL containing `error=access_denied` has no usable authorization code; start a fresh login after addressing the failure.
 

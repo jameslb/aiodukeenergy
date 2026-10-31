@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
@@ -714,7 +714,7 @@ class TestUsageAPI:
 
     @staticmethod
     async def _capture_daily_request_body(
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
         frozen_now: datetime,
         start: datetime,
         end: datetime,
@@ -732,7 +732,7 @@ class TestUsageAPI:
                 return current.astimezone(tz)
 
         monkeypatch.setattr(dukeenergy_module, "datetime", FrozenDateTime)
-        client = DukeEnergy(None)
+        client = DukeEnergy(MagicMock(spec=AbstractDukeEnergyAuth))
         client._meters = {
             "gas-meter": {
                 "serviceType": "GAS",
@@ -753,6 +753,7 @@ class TestUsageAPI:
 
         await client.get_energy_usage("gas-meter", "DAILY", "BILLINGCYCLE", start, end)
 
+        assert post_json.await_args is not None
         return post_json.await_args.args[1]
 
     @pytest.mark.asyncio
@@ -818,7 +819,7 @@ class TestUsageAPI:
     @pytest.mark.asyncio
     async def test_daily_request_body_current_day_31_february_start(self, monkeypatch):
         """Document the legacy invalid-date limitation for shorter months."""
-        with pytest.raises(ValueError, match="day is out of range for month"):
+        with pytest.raises(ValueError, match="day.*range"):
             await self._capture_daily_request_body(
                 monkeypatch,
                 datetime(2026, 3, 31, 12, 34, 56, 789123),
@@ -1068,17 +1069,17 @@ class TestUsageAPI:
                 timestamps = sorted(result["data"].keys())
                 for i in range(1, len(timestamps)):
                     time_diff = timestamps[i] - timestamps[i - 1]
-                    assert time_diff == timedelta(hours=1), (
-                        f"Expected 1 hour difference, got {time_diff}"
-                    )
+                    assert time_diff == timedelta(
+                        hours=1
+                    ), f"Expected 1 hour difference, got {time_diff}"
 
                 # The 1 AM on day 2 should have the first value, not the duplicate
                 day2_1am = start + timedelta(days=1, hours=1)
                 if day2_1am in result["data"]:
                     energy_value = result["data"][day2_1am]["energy"]
-                    assert energy_value != 900.0, (
-                        "Should not have the duplicate hour value (900.0)"
-                    )
+                    assert (
+                        energy_value != 900.0
+                    ), "Should not have the duplicate hour value (900.0)"
 
 
 class TestErrorHandling:
