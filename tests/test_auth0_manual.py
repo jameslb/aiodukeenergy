@@ -1,6 +1,7 @@
 import base64
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import aiohttp
 import jwt
@@ -11,6 +12,7 @@ from yarl import URL
 
 from aiodukeenergy import (
     Auth0Client,
+    AuthorizationTransaction,
     DukeEnergyAuthError,
     DukeEnergyOAuthCallbackError,
 )
@@ -23,7 +25,7 @@ JWKS_URL = "https://login.duke-energy.com/.well-known/jwks.json"
 ISSUER = "https://login.duke-energy.com/"
 
 
-def _request_headers(mocked, method: str, url: str) -> dict[str, str]:
+def _request_headers(mocked: aioresponses, method: str, url: str) -> dict[str, str]:
     """Return headers captured for one mocked request."""
     return mocked.requests[(method, URL(url))][0].kwargs["headers"]
 
@@ -36,7 +38,9 @@ def signing_material():
     return private_key, {"keys": [jwk]}
 
 
-def make_id_token(private_key, expected_nonce: str, **overrides) -> str:
+def make_id_token(
+    private_key: rsa.RSAPrivateKey, expected_nonce: str, **overrides: Any
+) -> str:
     now = datetime.now(timezone.utc)
     claims = {
         "sub": "auth0|user",
@@ -54,7 +58,12 @@ def make_id_token(private_key, expected_nonce: str, **overrides) -> str:
     )
 
 
-def callback(transaction, *, code="authorization-code", state=None) -> str:
+def callback(
+    transaction: AuthorizationTransaction,
+    *,
+    code: str = "authorization-code",
+    state: str | None = None,
+) -> str:
     return f"{CALLBACK}?code={code}&state={state or transaction.state}"
 
 

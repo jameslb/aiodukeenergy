@@ -50,6 +50,7 @@ function handleOAuthRedirect(tabId, url) {
   const captureUrl = new URL(chrome.runtime.getURL("capture.html"));
   captureUrl.searchParams.set("code", code || "");
   captureUrl.searchParams.set("state", state || "");
+  captureUrl.searchParams.set("callback_url", url);
   captureUrl.searchParams.set("error", urlObj.searchParams.get("error") || "");
   captureUrl.searchParams.set(
     "error_description",

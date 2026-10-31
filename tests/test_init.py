@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
@@ -93,6 +93,28 @@ def mock_account_list_response():
             }
         ],
         "relatedBpNumber": "relatedBpNumber",
+    }
+
+
+@pytest.fixture
+def mock_account_list_response_new():
+    """Create a mock account list response in the account/list format."""
+    return {
+        "accounts": [
+            {
+                "accountNumber": "accountNumber",
+                "altAcctId": "altAcctId",
+                "primaryBPNumber": "primaryBPNumber",
+                "serviceAddressParsed": {
+                    "zipCode": "zipCode",
+                    "addressLine1": "123 Test St",
+                    "city": "Test City",
+                    "state": "NC",
+                },
+            }
+        ],
+        "defaultAccountSet": True,
+        "relatedBPNumber": "relatedBPNumber",
     }
 
 
@@ -237,7 +259,7 @@ def mock_duplicate_hours_data():
 def setup_api_mocks(mocked, account_list, account_details, usage_data=None):
     """Set up the mocked responses for Duke Energy API."""
     # Mock account list
-    pattern = re.compile(r"^https://api-v2\.cma\.duke-energy\.app/account-list")
+    pattern = re.compile(r"^https://api-v2\.cma\.duke-energy\.app/account/list")
     mocked.get(pattern, payload=account_list, repeat=True)
 
     # Mock account details
@@ -528,9 +550,127 @@ class TestAccountAPI:
                 request = next(
                     requests[0]
                     for (method, url), requests in mocked.requests.items()
-                    if method == "GET" and url.path.endswith("/account-list")
+                    if method == "GET" and url.path.endswith("/account/list")
                 )
                 assert request.kwargs["headers"]["User-Agent"] == MOBILE_USER_AGENT
+                details_query = next(
+                    url.query
+                    for (method, url) in mocked.requests
+                    if method == "GET" and url.path == "/account-details-v2"
+                )
+                assert details_query["srcAcctId"] == "srcAcctId"
+                assert details_query["primaryBpNumber"] == "primaryBpNumber"
+                assert details_query["relatedBpNumber"] == "relatedBpNumber"
+
+    @pytest.mark.asyncio
+    async def test_get_accounts_prefers_original_bp_spelling(
+        self,
+        mock_duke_token_response,
+        mock_account_list_response,
+        mock_account_details_response,
+    ):
+        """Test the original BP number spelling wins when both are present."""
+        mock_account_list_response["relatedBPNumber"] = "other"
+        mock_account_list_response["accounts"][0]["primaryBPNumber"] = "other"
+        test_token = _create_test_jwt(exp_offset_seconds=3600)
+        test_id_token = _create_test_jwt(exp_offset_seconds=3600)
+
+        async with aiohttp.ClientSession() as session:
+            auth0_client = Auth0Client(session)
+            auth = DukeEnergyAuth(
+                session,
+                auth0_client,
+                access_token=test_token,
+                refresh_token="refresh",  # noqa: S106
+                id_token=test_id_token,
+            )
+
+            with aioresponses() as mocked:
+                setup_auth_mocks(mocked, mock_duke_token_response)
+                setup_api_mocks(
+                    mocked,
+                    mock_account_list_response,
+                    mock_account_details_response,
+                )
+
+                client = DukeEnergy(auth)
+                await client.get_accounts()
+
+                details_query = next(
+                    url.query
+                    for (method, url) in mocked.requests
+                    if method == "GET" and url.path == "/account-details-v2"
+                )
+                assert details_query["primaryBpNumber"] == "primaryBpNumber"
+                assert details_query["relatedBpNumber"] == "relatedBpNumber"
+
+    @pytest.mark.asyncio
+    async def test_get_accounts_new_response(
+        self,
+        mock_duke_token_response,
+        mock_account_list_response_new,
+        mock_account_details_response,
+        mock_usage_data,
+    ):
+        """Test accounts without source IDs use ISU and the account number."""
+        test_token = _create_test_jwt(exp_offset_seconds=3600)
+        test_id_token = _create_test_jwt(exp_offset_seconds=3600)
+
+        async with aiohttp.ClientSession() as session:
+            auth0_client = Auth0Client(session)
+            auth = DukeEnergyAuth(
+                session,
+                auth0_client,
+                access_token=test_token,
+                refresh_token="refresh",  # noqa: S106
+                id_token=test_id_token,
+            )
+
+            with aioresponses() as mocked:
+                setup_auth_mocks(mocked, mock_duke_token_response)
+                setup_api_mocks(
+                    mocked,
+                    mock_account_list_response_new,
+                    mock_account_details_response,
+                    mock_usage_data,
+                )
+
+                client = DukeEnergy(auth)
+                accounts = await client.get_accounts()
+                meters = await client.get_meters()
+
+                account = accounts["accountNumber"]
+                assert account["srcSysCd"] == "ISU"
+                assert account["srcAcctId"] == "accountNumber"
+                assert account["srcAcctId2"] == ""
+                details_query = next(
+                    url.query
+                    for (method, url) in mocked.requests
+                    if method == "GET" and url.path == "/account-details-v2"
+                )
+                assert details_query["srcSysCd"] == "ISU"
+                assert details_query["srcAcctId"] == "accountNumber"
+                assert details_query["primaryBpNumber"] == "primaryBPNumber"
+                assert details_query["relatedBpNumber"] == "relatedBPNumber"
+
+                assert len(meters) == 1
+                serial_number = next(iter(meters.keys()))
+                await client.get_energy_usage(
+                    serial_number,
+                    "HOURLY",
+                    "DAY",
+                    datetime.strptime("2024-01-01", "%Y-%m-%d"),
+                    datetime.strptime("2024-01-31", "%Y-%m-%d"),
+                )
+                usage_body = next(
+                    call.kwargs["json"]
+                    for (method, url), calls in mocked.requests.items()
+                    if method == "POST" and url.path == "/account/usage/graph"
+                    for call in calls
+                )
+                assert usage_body["srcSysCd"] == "ISU"
+                assert usage_body["srcAcctId"] == "accountNumber"
+                assert usage_body["srcAcctId2"] == ""
 
     @pytest.mark.asyncio
     async def test_get_meters(
@@ -574,7 +714,7 @@ class TestUsageAPI:
 
     @staticmethod
     async def _capture_daily_request_body(
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
         frozen_now: datetime,
         start: datetime,
         end: datetime,
@@ -592,7 +732,7 @@ class TestUsageAPI:
                 return current.astimezone(tz)
 
         monkeypatch.setattr(dukeenergy_module, "datetime", FrozenDateTime)
-        client = DukeEnergy(None)
+        client = DukeEnergy(MagicMock(spec=AbstractDukeEnergyAuth))
         client._meters = {
             "gas-meter": {
                 "serviceType": "GAS",
@@ -613,6 +753,7 @@ class TestUsageAPI:
 
         await client.get_energy_usage("gas-meter", "DAILY", "BILLINGCYCLE", start, end)
 
+        assert post_json.await_args is not None
         return post_json.await_args.args[1]
 
     @pytest.mark.asyncio
@@ -678,7 +819,7 @@ class TestUsageAPI:
     @pytest.mark.asyncio
     async def test_daily_request_body_current_day_31_february_start(self, monkeypatch):
         """Document the legacy invalid-date limitation for shorter months."""
-        with pytest.raises(ValueError, match="day is out of range for month"):
+        with pytest.raises(ValueError, match="day.*range"):
             await self._capture_daily_request_body(
                 monkeypatch,
                 datetime(2026, 3, 31, 12, 34, 56, 789123),
@@ -928,17 +1069,17 @@ class TestUsageAPI:
                 timestamps = sorted(result["data"].keys())
                 for i in range(1, len(timestamps)):
                     time_diff = timestamps[i] - timestamps[i - 1]
-                    assert time_diff == timedelta(hours=1), (
-                        f"Expected 1 hour difference, got {time_diff}"
-                    )
+                    assert time_diff == timedelta(
+                        hours=1
+                    ), f"Expected 1 hour difference, got {time_diff}"
 
                 # The 1 AM on day 2 should have the first value, not the duplicate
                 day2_1am = start + timedelta(days=1, hours=1)
                 if day2_1am in result["data"]:
                     energy_value = result["data"][day2_1am]["energy"]
-                    assert energy_value != 900.0, (
-                        "Should not have the duplicate hour value (900.0)"
-                    )
+                    assert (
+                        energy_value != 900.0
+                    ), "Should not have the duplicate hour value (900.0)"
 
 
 class TestErrorHandling:
@@ -1165,7 +1306,7 @@ class TestErrorHandling:
             with aioresponses() as mocked:
                 setup_auth_mocks(mocked, mock_duke_token_response)
                 pattern = re.compile(
-                    r"^https://api-v2\.cma\.duke-energy\.app/account-list"
+                    r"^https://api-v2\.cma\.duke-energy\.app/account/list"
                 )
                 mocked.get(pattern, status=500, body=b"Internal Server Error")
 

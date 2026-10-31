@@ -116,6 +116,11 @@
         fill: #1a5276;
       }
 
+      .error-detail {
+        font-family: "Consolas", "Monaco", monospace;
+        color: #c62828;
+      }
+
       .toast {
         position: fixed;
         bottom: 20px;
@@ -145,6 +150,15 @@
         </div>
         <h1>Duke Energy Authorization Code Captured!</h1>
         <p>Copy this code and paste it in your application.</p>
+        <div id="callbackSection" style="display: none">
+          <p>
+            For Home Assistant's complete callback URL field, use this button.
+            Keep this URL private.
+          </p>
+          <button id="copyCallback" type="button">
+            Copy complete callback URL
+          </button>
+        </div>
 
         <div class="code-box">
           <div class="code-display" id="authCode"></div>
@@ -167,10 +181,11 @@
           </svg>
         </div>
         <h1>No Authorization Code</h1>
-        <p>
+        <p id="noCodeMessage">
           No code was captured. Please complete the Duke Energy login flow
           first.
         </p>
+        <p id="errorDetail" class="error-detail" style="display: none"></p>
       </div>
     </div>
 
